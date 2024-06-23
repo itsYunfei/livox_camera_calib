@@ -16,6 +16,7 @@ string result_file;
 // Camera config
 vector<double> camera_matrix;
 vector<double> dist_coeffs;
+vector<double> dist_coeffs_KB;
 double width;
 double height;
 
@@ -200,6 +201,7 @@ int main(int argc, char **argv) {
   nh.param<vector<double>>("camera/camera_matrix", camera_matrix,
                            vector<double>());
   nh.param<vector<double>>("camera/dist_coeffs", dist_coeffs, vector<double>());
+  nh.param<vector<double>>("camera/dist_coeffs_KB", dist_coeffs_KB, vector<double>());
   nh.param<bool>("calib/use_rough_calib", use_rough_calib, false);
   nh.param<string>("calib/calib_config_file", calib_config_file, "");
 
@@ -213,9 +215,16 @@ int main(int argc, char **argv) {
   calibra.p1_ = dist_coeffs[2];
   calibra.p2_ = dist_coeffs[3];
   calibra.k3_ = dist_coeffs[4];
+  calibra.k1_kb_ = dist_coeffs_KB[0];
+  calibra.k2_kb_ = dist_coeffs_KB[1];
+  calibra.k3_kb_ = dist_coeffs_KB[2];
+  calibra.k4_kb_ = dist_coeffs_KB[3];
   Eigen::Vector3d init_euler_angle =
       calibra.init_rotation_matrix_.eulerAngles(2, 1, 0);
   Eigen::Vector3d init_transation = calibra.init_translation_vector_;
+
+  calibra.undistortImgFisheye();
+  calibra.FeatureExtraction();
 
   Vector6d calib_params;
   calib_params << init_euler_angle(0), init_euler_angle(1), init_euler_angle(2),

@@ -62,6 +62,8 @@ public:
   Eigen::Vector3d adjust_euler_angle_;
   Calibration(const std::string &image_file, const std::string &pcd_file,
               const std::string &calib_config_file);
+  void undistortImgFisheye();
+  void FeatureExtraction();
   void loadImgAndPointcloud(const std::string bag_path,
                             pcl::PointCloud<pcl::PointXYZI>::Ptr &origin_cloud,
                             cv::Mat &rgb_img);
@@ -120,6 +122,7 @@ public:
                      Eigen::Matrix2f &covarance);
   // 相机内参
   float fx_, fy_, cx_, cy_, k1_, k2_, p1_, p2_, k3_, s_;
+  float k1_kb_, k2_kb_, k3_kb_, k4_kb_;
   int width_, height_;
   cv::Mat camera_matrix_;
   cv::Mat dist_coeffs_;
@@ -177,23 +180,11 @@ Calibration::Calibration(const std::string &image_file,
   }
   width_ = image_.cols;
   height_ = image_.rows;
-  // check rgb or gray
-  if (image_.type() == CV_8UC1) {
-    grey_image_ = image_;
-  } else if (image_.type() == CV_8UC3) {
-    cv::cvtColor(image_, grey_image_, cv::COLOR_BGR2GRAY);
-  } else {
-    std::string msg = "Unsupported image type, please use CV_8UC3 or CV_8UC1";
-    ROS_ERROR_STREAM(msg.c_str());
-    exit(-1);
-  }
-  cv::Mat edge_image;
 
-  edgeDetector(rgb_canny_threshold_, rgb_edge_minLen_, grey_image_, edge_image,
-               rgb_egde_cloud_);
-  std::string msg = "Sucessfully extract edge from image, edge size:" +
-                    std::to_string(rgb_egde_cloud_->size());
-  ROS_INFO_STREAM(msg.c_str());
+  if (image_.depth() != CV_8U) {
+      // Convert to 8-bit unsigned if not already
+      image_.convertTo(image_, CV_8U);
+  }
 
   raw_lidar_cloud_ =
       pcl::PointCloud<pcl::PointXYZI>::Ptr(new pcl::PointCloud<pcl::PointXYZI>);
@@ -208,6 +199,15 @@ Calibration::Calibration(const std::string &image_file,
     ROS_ERROR_STREAM(msg.c_str());
     exit(-1);
   }
+};
+
+void Calibration::FeatureExtraction() {
+  cv::Mat edge_image;
+  edgeDetector(rgb_canny_threshold_, rgb_edge_minLen_, grey_image_, edge_image,
+               rgb_egde_cloud_);
+  std::string msg = "Sucessfully extract edge from image, edge size:" +
+                    std::to_string(rgb_egde_cloud_->size());
+  ROS_INFO_STREAM(msg.c_str());
 
   Eigen::Vector3d lwh(50, 50, 30);
   Eigen::Vector3d origin(0, -25, -10);
@@ -217,6 +217,33 @@ Calibration::Calibration(const std::string &image_file,
   LiDAREdgeExtraction(voxel_map, ransac_dis_threshold_, plane_size_threshold_,
                       plane_line_cloud_);
 };
+
+void Calibration::undistortImgFisheye() {
+  cv::Mat K = (cv::Mat_<double>(3, 3) << 
+                fx_, 0.0, cx_,
+                0.0, fy_, cy_,
+                0.0, 0.0, 1.0
+    );
+  cv::Mat D_KB = (cv::Mat_<double>(4, 1) <<
+                  k1_kb_, k2_kb_, k3_kb_, k4_kb_
+    );
+  cv::fisheye::undistortImage(image_, image_, K, D_KB, K);
+  ROS_INFO_STREAM("Image undistort using KB model!");
+
+  // check rgb or gray
+  if (image_.type() == CV_8UC1) {
+    grey_image_ = image_;
+  } else if (image_.type() == CV_8UC3) {
+    cv::cvtColor(image_, grey_image_, cv::COLOR_BGR2GRAY);
+  } else if (image_.type() == CV_8UC4) {
+    cv::cvtColor(image_, image_, cv::COLOR_BGRA2BGR);
+    cv::cvtColor(image_, grey_image_, cv::COLOR_BGR2GRAY);
+  } else {
+    std::string msg = "Unsupported image type, please use CV_8UC4, CV_8UC3 or CV_8UC1";
+    ROS_ERROR_STREAM(msg.c_str());
+    exit(-1);
+  }
+}
 
 bool Calibration::loadCameraConfig(const std::string &camera_file) {
   cv::FileStorage cameraSettings(camera_file, cv::FileStorage::READ);
